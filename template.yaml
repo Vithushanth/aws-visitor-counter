@@ -1,0 +1,64 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Visitor counter API - HTTP API + Lambda + DynamoDB.
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: https://vithu.cloud
+    Description: The only website allowed to call this API from a browser.
+
+Resources:
+  CounterTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  CounterApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins:
+          - !Ref AllowedOrigin
+        AllowMethods:
+          - POST
+      DefaultRouteSettings:
+        # caps abuse: a burst of 5, then 2 requests a second
+        ThrottlingBurstLimit: 5
+        ThrottlingRateLimit: 2
+
+  HitFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.handler
+      Runtime: python3.12
+      CodeUri: src/
+      Timeout: 5
+      MemorySize: 128
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref CounterTable
+      Policies:
+        # least privilege: one action on one table
+        - Statement:
+            - Effect: Allow
+              Action: dynamodb:UpdateItem
+              Resource: !GetAtt CounterTable.Arn
+      Events:
+        Hit:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref CounterApi
+            Path: /hit
+            Method: post
+
+Outputs:
+  ApiUrl:
+    Description: Paste this into site/assets/config.js as counterApi
+    Value: !Sub "https://${CounterApi}.execute-api.${AWS::Region}.amazonaws.com/hit"
